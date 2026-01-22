@@ -1,0 +1,133 @@
+import pandas as pd
+
+PUNCTUATION = {".", ",", ";", ":", "?", "!", "—", "\""}
+TOLERANCE = 1  # allowed character shift
+
+def extract_punctuation_positions(text, allowed):
+    return [
+        (i, ch)
+        for i, ch in enumerate(text)
+        if ch in allowed
+    ]
+
+def match_punctuation(pred_punct, gold_punct, tolerance):
+    matched_gold = set()
+    tp = 0
+
+    for pi, pch in pred_punct:
+        for gi, gch in gold_punct:
+            if (
+                pch == gch
+                and gi not in matched_gold
+                and abs(pi - gi) <= tolerance
+            ):
+                tp += 1
+                matched_gold.add(gi)
+                break
+
+    fp = len(pred_punct) - tp
+    fn = len(gold_punct) - tp
+
+    return tp, fp, fn
+
+def punctuation_metrics(predicted, gold, allowed_punct, tolerance):
+    pred_punct = extract_punctuation_positions(predicted, allowed_punct)
+    gold_punct = extract_punctuation_positions(gold, allowed_punct)
+
+    tp, fp, fn = match_punctuation(pred_punct, gold_punct, tolerance)
+
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall)
+        else 0.0
+    )
+
+    return tp, fp, fn, precision, recall, f1
+
+
+def evaluate_dataframe(df, allowed_punct, tolerance):
+    totals = {"tp": 0, "fp": 0, "fn": 0}
+
+    for _, row in df.iterrows():
+        tp, fp, fn, _, _, _ = punctuation_metrics(
+            row["raw_output"],
+            row["correct"],
+            allowed_punct,
+            tolerance
+        )
+
+        totals["tp"] += tp
+        totals["fp"] += fp
+        totals["fn"] += fn
+
+    precision = totals["tp"] / (totals["tp"] + totals["fp"]) if totals["tp"] + totals["fp"] else 0.0
+    recall = totals["tp"] / (totals["tp"] + totals["fn"]) if totals["tp"] + totals["fn"] else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "tp": totals["tp"],
+        "fp": totals["fp"],
+        "fn": totals["fn"],
+    }
+
+
+def evaluate_by_punctuation(df, punctuation_set, tolerance):
+    results = {}
+
+    for punct in punctuation_set:
+        totals = {"tp": 0, "fp": 0, "fn": 0}
+
+        for _, row in df.iterrows():
+            tp, fp, fn, _, _, _ = punctuation_metrics(
+                row["raw_output"],
+                row["correct"],
+                allowed_punct={punct},
+                tolerance=tolerance
+            )
+
+            totals["tp"] += tp
+            totals["fp"] += fp
+            totals["fn"] += fn
+
+        precision = totals["tp"] / (totals["tp"] + totals["fp"]) if totals["tp"] + totals["fp"] else 0.0
+        recall = totals["tp"] / (totals["tp"] + totals["fn"]) if totals["tp"] + totals["fn"] else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if precision + recall
+            else 0.0
+        )
+
+        results[punct] = {
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "tp": totals["tp"],
+            "fp": totals["fp"],
+            "fn": totals["fn"],
+        }
+
+    return pd.DataFrame(results).T.sort_index()
+
+
+df = pd.read_excel(
+    ".../results/scores_gemma_English0.xlsx"
+)
+
+#Evaluation
+print("=== Overall punctuation evaluation (all marks) ===")
+overall_metrics = evaluate_dataframe(df, PUNCTUATION, TOLERANCE)
+for k, v in overall_metrics.items():
+    print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")
+
+print("\n=== Per-punctuation evaluation ===")
+per_punct_df = evaluate_by_punctuation(df, PUNCTUATION, TOLERANCE)
+display(per_punct_df)
